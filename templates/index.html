@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News AI Agent System</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📰 News AI Agent System</h1>
+            <p>Compare Non-MCTS vs 3 MCTS Variants</p>
+        </header>
+        
+        <div class="input-section">
+    <!-- <select id="category" class="category-select">
+        <option value="">Select a category...</option>
+        <option value="technology">Technology</option>
+        <option value="sports">Sports</option>
+        <option value="health">Health</option>
+        <option value="business">Business</option>
+        <option value="science">Science</option>
+        <option value="entertainment">Entertainment</option>
+        <option value="politics">Politics</option>
+        <option value="world">World News</option>
+    </select> -->
+    <select id="category" class="category-select">
+    <option value="">All Categories</option>
+    {% for category in categories %}
+    <option value="{{ category }}">{{ category|title }}</option>
+    {% endfor %}
+</select>
+    <input 
+        type="text" 
+        id="topic" 
+        placeholder="Or enter custom topic (e.g., Artificial Intelligence, Climate Change)"
+        autocomplete="off"
+    >
+    <div class="numeric-group">
+        <label for="numArticles">Articles</label>
+        <input
+            type="number"
+            id="numArticles"
+            min="1"
+            max="30"
+            value="5"
+        >
+    </div>
+    <div class="numeric-group">
+        <label for="mctsIterations">MCTS Iterations</label>
+        <input
+            type="number"
+            id="mctsIterations"
+            min="1"
+            max="500"
+            placeholder="Auto"
+        >
+    </div>
+    <button onclick="processTopic()" id="processBtn">
+        <span>Get News</span>
+        <div class="spinner" id="spinner" style="display: none;"></div>
+    </button>
+</div>
+        
+        <div id="results" class="results-section"></div>
+    </div>
+    
+    <script>
+       async function processTopic() {
+    const category = document.getElementById('category').value;
+    const topic = document.getElementById('topic').value;
+    const processBtn = document.getElementById('processBtn');
+    const spinner = document.getElementById('spinner');
+    const resultsDiv = document.getElementById('results');
+    const numArticles = document.getElementById('numArticles').value;
+    const mctsIterations = document.getElementById('mctsIterations').value;
+    const numArticlesValue = numArticles ? parseInt(numArticles, 10) : null;
+    const mctsIterationsValue = mctsIterations ? parseInt(mctsIterations, 10) : null;
+    
+    // Determine search topic
+    let searchTopic = topic;
+    if (category && !topic) {
+        searchTopic = category;
+    } else if (category && topic) {
+        searchTopic = `${category} ${topic}`;
+    } else if (!category && !topic) {
+        alert('Please select a category or enter a topic');
+        return;
+    }
+    
+    // Show loading state
+    processBtn.disabled = true;
+    spinner.style.display = 'inline-block';
+    resultsDiv.innerHTML = '<div class="loading">🔍 Searching for news with all 4 agents...<br><small>This may take 30-60 seconds</small></div>';
+    
+    // Add a timeout warning
+    const timeoutWarning = setTimeout(() => {
+        if (processBtn.disabled) {
+            resultsDiv.innerHTML += '<div class="warning">⏳ Still processing... MCTS agents are exploring multiple branches</div>';
+        }
+    }, 15000);
+    
+    try {
+        console.log(`Searching for: ${searchTopic}`);
+        
+        const response = await fetch('/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                topic: searchTopic,
+                category: category,
+                num_articles: numArticlesValue,
+                mcts_iterations: mctsIterationsValue
+            })
+        });
+        
+        clearTimeout(timeoutWarning);
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayResults(data);
+        } else {
+            resultsDiv.innerHTML = `<div class="error">❌ Error: ${data.error}</div>`;
+        }
+    } catch (error) {
+        clearTimeout(timeoutWarning);
+        resultsDiv.innerHTML = `<div class="error">❌ Connection error: ${error.message}</div>`;
+        console.error('Error:', error);
+    } finally {
+        // Reset loading state
+        processBtn.disabled = false;
+        spinner.style.display = 'none';
+    }
+}
+
+function displayResults(data) {
+    const resultsDiv = document.getElementById('results');
+    const results = data.results;
+    const rankings = data.rankings;
+    const improvementValue = results._meta ? results._meta.improvement : 0;
+    let improvementLine = '⚖️ MCTS and Basic Agent performed the same on average';
+    if (improvementValue > 0) {
+        improvementLine = '✅ MCTS improved average accuracy over the Basic Agent';
+    } else if (improvementValue < 0) {
+        improvementLine = '⚠️ Basic Agent outperformed MCTS on average';
+    }
+    const branches = results['R-MCTS (Reflective)']?.mcts_stats?.nodes_explored || 'multiple';
+    
+    // Filter out meta data and sort by accuracy
+    const sortedAgents = Object.entries(results)
+        .filter(([name]) => !name.startsWith('_'))
+        .sort((a, b) => b[1].accuracy_score - a[1].accuracy_score);
+    
+    let html = `
+        <div class="topic-header">
+            <h2>📊 Results for: "${data.topic}"</h2>
+            <div class="ranking-badge">
+                🏆 Top: <strong>${rankings[0].name}</strong> (${(rankings[0].accuracy * 100).toFixed(1)}%)
+            </div>
+        </div>
+        
+        <div class="agents-grid">
+    `;
+    
+    for (const [name, result] of sortedAgents) {
+        const isMCTS = !!result.mcts_stats;
+        const cardClass = isMCTS ? 'mcts-card' : 'basic-card';
+        const accuracyClass = result.accuracy_score >= 0.8 ? 'high-accuracy' : 
+                             result.accuracy_score >= 0.6 ? 'medium-accuracy' : 'low-accuracy';
+        
+        // Generate news list HTML
+        let newsListHtml = '';
+        if (result.news && result.news.length > 0) {
+            newsListHtml = '<ul class="news-list">';
+            result.news.forEach((news, index) => {
+                newsListHtml += `
+                    <li class="news-item">
+                        <div class="news-title">
+                            <span class="news-number">${index + 1}.</span>
+                            <span class="news-text">${news.title}</span>
+                        </div>
+                        <div class="news-meta">
+                            <span class="category">${news.category || 'General'}</span>
+                            <span class="relevance">${Math.round(news.relevance_score * 100)}% match</span>
+                        </div>
+                    </li>
+                `;
+            });
+            newsListHtml += '</ul>';
+        } else {
+            newsListHtml = '<p class="no-news">No news articles found</p>';
+        }
+        
+        html += `
+            <div class="agent-card ${cardClass}">
+                <div class="agent-header">
+                    <h3>${name}</h3>
+                    <span class="badge ${isMCTS ? 'mcts' : 'basic'}">${isMCTS ? '🤖 MCTS' : '📋 Basic'}</span>
+                </div>
+                
+                <div class="accuracy-meter">
+                    <div class="meter-label">
+                        <span>Accuracy</span>
+                        <span class="${accuracyClass}">${(result.accuracy_score * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="meter-bar">
+                        <div class="meter-fill ${accuracyClass}" style="width: ${result.accuracy_score * 100}%"></div>
+                    </div>
+                </div>
+                
+                <div class="news-summary">
+                    <h4>📰 Selected Articles (${result.news_count})</h4>
+                    ${newsListHtml}
+                    
+                    <h4>📝 AI Summary</h4>
+                    <p class="summary-text">${result.summary}</p>
+                </div>
+                
+                <div class="agent-stats">
+                    <div class="stat">
+                        <span class="stat-label">Articles</span>
+                        <span class="stat-value">${result.news_count}</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Time</span>
+                        <span class="stat-value">${result.processing_time || '0'}s</span>
+                    </div>
+                    ${result.personalization_score ? `
+                    <div class="stat">
+                        <span class="stat-label">Personalization</span>
+                        <span class="stat-value">${Math.round(result.personalization_score * 100)}%</span>
+                    </div>
+                    ` : ''}
+                </div>
+                
+                ${result.note ? `<div class="note">📌 ${result.note}</div>` : ''}
+                
+                ${result.mcts_stats ? `
+                <div class="mcts-stats">
+                    <details>
+                        <summary>🔍 MCTS Details</summary>
+                        <pre>${JSON.stringify(result.mcts_stats, null, 2)}</pre>
+                    </details>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    }
+    
+    html += `</div>`;
+    
+    // Add summary footer if meta data exists
+    if (results._meta) {
+        const improvementSign = results._meta.improvement > 0 ? '+' : '';
+        html += `
+            <div class="summary-footer">
+                <h3>📊 Performance Summary</h3>
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <span class="summary-label">Average MCTS Accuracy</span>
+                        <span class="summary-value">${(results._meta.avg_mcts_accuracy * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Basic Agent Accuracy</span>
+                        <span class="summary-value">${(results._meta.basic_accuracy * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="summary-item improvement">
+                        <span class="summary-label">MCTS Improvement</span>
+                        <span class="summary-value">${improvementSign}${(results._meta.improvement * 100).toFixed(1)}%</span>
+                    </div>
+                </div>
+                <ul class="summary-list">
+                    <li>${improvementLine}</li>
+                    <li>📈 Best performer: ${rankings[0].name} (${(rankings[0].accuracy * 100).toFixed(1)}%)</li>
+                    <li>MCTS agents explored ${branches} nodes in the reflective tree</li>
+                </ul>
+            </div>
+        `;
+    }
+    
+    resultsDiv.innerHTML = html;
+    
+    // Scroll to results
+    resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Add enter key support
+document.getElementById('topic').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        processTopic();
+    }
+});
+
+// Add category change handler
+document.getElementById('category').addEventListener('change', function(e) {
+    const topicInput = document.getElementById('topic');
+    if (this.value && !topicInput.value) {
+        topicInput.placeholder = `Optional: refine ${this.value} topic...`;
+    } else {
+        topicInput.placeholder = 'Or enter custom topic...';
+    }
+});
+
+// Load categories on page load
+window.addEventListener('load', async function() {
+    try {
+        const response = await fetch('/categories');
+        const data = await response.json();
+        
+        if (data.success && data.categories) {
+            const select = document.getElementById('category');
+            // Keep the first "All Categories" option
+            select.innerHTML = '<option value="">All Categories</option>';
+            
+            data.categories.forEach(category => {
+                if (category) {
+                    const option = document.createElement('option');
+                    option.value = category;
+                    option.textContent = category.charAt(0).toUpperCase() + category.slice(1);
+                    select.appendChild(option);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load categories:', error);
+    }
+});
+    </script>
+</body>
+</html>
