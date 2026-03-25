@@ -3,8 +3,8 @@ import json
 
 class OllamaClient:
     """Client for Ollama API"""
-    
-    def __init__(self, model='llama2', base_url='http://localhost:11434'):
+    #def __init__(self, model='llama2', base_url='http://localhost:11434'):
+    def __init__(self, model='llama3.2:1b', base_url='http://localhost:11434'):
         self.model = model
         self.base_url = base_url
         self.api_url = f"{base_url}/api/generate"
